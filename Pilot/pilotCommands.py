@@ -1,15 +1,15 @@
 """ Definitions of a standard set of pilot commands
 
-    Each commands is represented by a class inheriting CommandBase class.
+    Each command is represented by a class inheriting from CommandBase class.
     The command class constructor takes PilotParams object which is a data
     structure which keeps common parameters across all the pilot commands.
 
     The constructor must call the superclass constructor with the PilotParams
-    object and the command name as arguments, e.g. ::
+    object and the command name as arguments, e.g.::
 
-        class InstallDIRAC( CommandBase ):
+        class InstallDIRAC(CommandBase):
 
-          def __init__( self, pilotParams ):
+          def __init__(self, pilotParams):
             CommandBase.__init__(self, pilotParams, 'Install')
             ...
 
@@ -17,7 +17,9 @@
     execution.
 """
 
-from __future__ import absolute_import, division, print_function
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
 
 __RCSID__ = "$Id$"
 
@@ -26,6 +28,8 @@ import os
 import time
 import stat
 import socket
+import filecmp
+from distutils.version import LooseVersion
 
 ############################
 # python 2 -> 3 "hacks"
@@ -269,7 +273,7 @@ class ConfigureBasics(CommandBase):
 
       * download, by default, the CAs
       * creates a standard or custom (defined by self.pp.localConfigFile) cfg file
-        to be used where all the pilot configuration is to be set, e.g.:
+        (by default 'pilot.cfg') to be used where all the pilot configuration is to be set, e.g.:
       * adds to it basic info like the version
       * adds to it the security configuration
 
@@ -313,7 +317,7 @@ class ConfigureBasics(CommandBase):
     if self.pp.debugFlag:
       self.cfg.append('-ddd')
     if self.pp.localConfigFile:
-      self.cfg.append('-O %s' % self.pp.localConfigFile)
+      self.cfg.append('-O %s' % self.pp.localConfigFile)  # here, only as output
 
     configureCmd = "%s %s" % (self.pp.configureScript, " ".join(self.cfg))
 
@@ -355,6 +359,10 @@ class ConfigureBasics(CommandBase):
       self.cfg.append('-o /AgentJobRequirements/OwnerDN="%s"' % self.pp.userDN)
     self.cfg.append('-o /LocalSite/ReleaseVersion=%s' % self.pp.releaseVersion)
 
+    if self.pp.wnVO:
+      self.cfg.append(
+          '-o "/Resources/Computing/CEDefaults/VirtualOrganization=%s"' % self.pp.wnVO)
+
   def _getSecurityCFG(self):
     """ Nothing specific by default, but need to know host cert and key location in case they are needed
     """
@@ -384,6 +392,8 @@ class CheckCECapabilities(CommandBase):
     if self.pp.useServerCertificate:
       self.cfg.append('-o  /DIRAC/Security/UseServerCertificate=yes')
     if self.pp.localConfigFile:
+      if LooseVersion(self.pp.releaseVersion) >= self.cfgOptionDIRACVersion:
+        self.cfg.append('--cfg')
       self.cfg.append(self.pp.localConfigFile)  # this file is as input
 
     # Get the resource description as defined in its configuration
@@ -440,6 +450,8 @@ class CheckCECapabilities(CommandBase):
 
     if self.pp.localConfigFile:
       cfg.append('-O %s' % self.pp.localConfigFile)  # this file is as output
+      if LooseVersion(self.pp.releaseVersion) >= self.cfgOptionDIRACVersion:
+        cfg.append('--cfg')
       cfg.append(self.pp.localConfigFile)  # this file is as input
 
     if cfg:
@@ -476,6 +488,8 @@ class CheckWNCapabilities(CommandBase):
     if self.pp.useServerCertificate:
       self.cfg.append('-o /DIRAC/Security/UseServerCertificate=yes')
     if self.pp.localConfigFile:
+      if LooseVersion(self.pp.releaseVersion) >= self.cfgOptionDIRACVersion:
+        self.cfg.append('--cfg')
       self.cfg.append(self.pp.localConfigFile)  # this file is as input
     # Get the worker node parameters
     checkCmd = 'dirac-wms-get-wn-parameters -S %s -N %s -Q %s %s -d' % (self.pp.site,
@@ -543,6 +557,8 @@ class CheckWNCapabilities(CommandBase):
 
     if self.pp.localConfigFile:
       self.cfg.append('-O %s' % self.pp.localConfigFile)  # this file is as output
+      if LooseVersion(self.pp.releaseVersion) >= self.cfgOptionDIRACVersion:
+        self.cfg.append('--cfg')
       self.cfg.append(self.pp.localConfigFile)  # this file is as input
 
     if self.debugFlag:
@@ -602,6 +618,8 @@ class ConfigureSite(CommandBase):
     self.cfg.append('-FDMH')
     if self.pp.localConfigFile:
       self.cfg.append('-O %s' % self.pp.localConfigFile)
+      if LooseVersion(self.pp.releaseVersion) >= self.cfgOptionDIRACVersion:
+        self.cfg.append('--cfg')
       self.cfg.append(self.pp.localConfigFile)
 
     if self.debugFlag:
@@ -728,6 +746,8 @@ class ConfigureArchitecture(CommandBase):
     if self.pp.useServerCertificate:
       cfg.append('-o  /DIRAC/Security/UseServerCertificate=yes')
     if self.pp.localConfigFile:
+      if LooseVersion(self.pp.releaseVersion) >= self.cfgOptionDIRACVersion:
+        cfg.append('--cfg')
       cfg.append(self.pp.localConfigFile)  # this file is as input
 
     architectureCmd = "%s %s -d" % (self.pp.architectureScript, " ".join(cfg))
@@ -744,6 +764,8 @@ class ConfigureArchitecture(CommandBase):
       cfg.append('--UseServerCertificate')
     if self.pp.localConfigFile:
       cfg.append('-O %s' % self.pp.localConfigFile)  # our target file for pilots
+      if LooseVersion(self.pp.releaseVersion) >= self.cfgOptionDIRACVersion:
+        cfg.append('--cfg')
       cfg.append(self.pp.localConfigFile)  # this file is also an input
     if self.pp.debugFlag:
       cfg.append("-ddd")
@@ -779,7 +801,10 @@ class ConfigureCPURequirements(CommandBase):
     if self.pp.useServerCertificate:
       configFileArg = '-o /DIRAC/Security/UseServerCertificate=yes'
     if self.pp.localConfigFile:
-      configFileArg = '%s -R %s %s' % (configFileArg, self.pp.localConfigFile, self.pp.localConfigFile)
+      if LooseVersion(self.pp.releaseVersion) >= self.cfgOptionDIRACVersion:
+        configFileArg = '%s -R %s --cfg %s' % (configFileArg, self.pp.localConfigFile, self.pp.localConfigFile)
+      else:
+        configFileArg = '%s -R %s %s' % (configFileArg, self.pp.localConfigFile, self.pp.localConfigFile)
     retCode, cpuNormalizationFactorOutput = self.executeAndGetOutput(
         'dirac-wms-cpu-normalization -U %s -d' % configFileArg,
         self.pp.installEnv)
@@ -800,10 +825,14 @@ class ConfigureCPURequirements(CommandBase):
     configFileArg = ''
     if self.pp.useServerCertificate:
       configFileArg = '-o /DIRAC/Security/UseServerCertificate=yes'
+    if LooseVersion(self.pp.releaseVersion) >= self.cfgOptionDIRACVersion:
+      cfgFile = '--cfg %s' % self.pp.localConfigFile
+    else:
+      cfgFile = self.pp.localConfigFile
     retCode, cpuTimeOutput = self.executeAndGetOutput(
         'dirac-wms-get-queue-cpu-time --CPUNormalizationFactor=%f %s %s -d' % (cpuNormalizationFactor,
                                                                                configFileArg,
-                                                                               self.pp.localConfigFile),
+                                                                               cfgFile),
         self.pp.installEnv)
 
     if retCode:
@@ -830,6 +859,8 @@ class ConfigureCPURequirements(CommandBase):
       cfg.append('-o  /DIRAC/Security/UseServerCertificate=yes')
     if self.pp.localConfigFile:
       cfg.append('-O %s' % self.pp.localConfigFile)  # our target file for pilots
+      if LooseVersion(self.pp.releaseVersion) >= self.cfgOptionDIRACVersion:
+        cfg.append('--cfg')
       cfg.append(self.pp.localConfigFile)  # this file is also input
     cfg.append('-o /LocalSite/CPUTimeLeft=%s' % str(int(self.pp.jobCPUReq)))  # the only real option
 
@@ -900,6 +931,8 @@ class LaunchAgent(CommandBase):
     # The file pilot.cfg has to be created previously by ConfigureDIRAC
     if self.pp.localConfigFile:
       self.innerCEOpts.append(' -o /AgentJobRequirements/ExtraOptions=%s' % self.pp.localConfigFile)
+      if LooseVersion(self.pp.releaseVersion) >= self.cfgOptionDIRACVersion:
+        self.innerCEOpts.append('--cfg')
       self.innerCEOpts.append(self.pp.localConfigFile)
 
   def __startJobAgent(self):
@@ -913,7 +946,9 @@ class LaunchAgent(CommandBase):
     extraCFG = []
     for i in os.listdir(self.pp.rootPath):
       cfg = os.path.join(self.pp.rootPath, i)
-      if os.path.isfile(cfg) and cfg.endswith('.cfg'):
+      if os.path.isfile(cfg) and cfg.endswith('.cfg') and not filecmp.cmp(self.pp.localConfigFile, cfg):
+        if LooseVersion(self.pp.releaseVersion) >= self.cfgOptionDIRACVersion:
+          extraCFG.append('--cfg')
         extraCFG.append(cfg)
 
     if self.pp.executeCmd:
@@ -999,6 +1034,8 @@ class MultiLaunchAgent(CommandBase):
     # The file pilot.cfg has to be created previously by ConfigureDIRAC
     if self.pp.localConfigFile:
       self.inProcessOpts.append(' -o /AgentJobRequirements/ExtraOptions=%s' % self.pp.localConfigFile)
+      if LooseVersion(self.pp.releaseVersion) >= self.cfgOptionDIRACVersion:
+        self.inProcessOpts.append('--cfg')
       self.inProcessOpts.append(self.pp.localConfigFile)
 
   def __startJobAgent(self):
